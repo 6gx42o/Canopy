@@ -39,9 +39,19 @@ cp Info.plist "$APP/Contents/Info.plist"
 [ -d Resources/MediaRemoteAdapter.framework ] && cp -R Resources/MediaRemoteAdapter.framework "$APP/Contents/Resources/"
 [ -f Resources/MediaRemoteAdapterTestClient ] && cp Resources/MediaRemoteAdapterTestClient "$APP/Contents/Resources/"
 
-echo "▸ Ad-hoc signing (hardened runtime + entitlements)…"
+# Prefer a stable signing identity (Apple Development / Developer ID) so TCC
+# grants — Screen Recording for the EQ bars especially — survive rebuilds.
+# Ad-hoc signatures change every build and silently invalidate those grants.
+IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+  | awk -F'"' '/Developer ID Application|Apple Development/{print $2; exit}')
+SIGN="${IDENTITY:--}"
+if [ "$SIGN" = "-" ]; then
+  echo "▸ Ad-hoc signing (no Developer identity found; TCC grants won't persist across rebuilds)…"
+else
+  echo "▸ Signing as: $SIGN"
+fi
 codesign --force --deep --options runtime \
-  --entitlements Canopy.entitlements --sign - "$APP" >/dev/null 2>&1 \
+  --entitlements Canopy.entitlements --sign "$SIGN" "$APP" >/dev/null 2>&1 \
   || codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 
 echo "✓ Built $APP"

@@ -74,6 +74,9 @@ final class NowPlayingModel: ObservableObject {
     private func tick() {
         elapsed = liveElapsed()
         updateLyricIndex()
+        // Reconcile audio capture each tick so it retries after the user grants
+        // Screen Recording (no relaunch needed).
+        AudioLevelMonitor.shared.setEnabled(isPlaying && !title.isEmpty)
     }
 
     /// Elapsed playback time projected to `date` from the last sampled

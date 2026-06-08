@@ -46,36 +46,31 @@ final class AudioAnalyzer {
         let channels = max(1, Int(asbd.mChannelsPerFrame))
         let nonInterleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
 
-        var blockBuffer: CMBlockBuffer?
-        var abl = AudioBufferList()
-        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-            sampleBuffer,
-            bufferListSizeNeededOut: nil,
-            bufferListOut: &abl,
-            bufferListSize: MemoryLayout<AudioBufferList>.size,
-            blockBufferAllocator: nil,
-            blockBufferMemoryAllocator: nil,
-            flags: 0,
-            blockBufferOut: &blockBuffer
-        )
-        guard status == noErr else { return nil }
-        let buffers = UnsafeMutableAudioBufferListPointer(&abl)
-        guard let firstBuffer = buffers.first, let data = firstBuffer.mData else { return nil }
-
-        let floatCount = Int(firstBuffer.mDataByteSize) / MemoryLayout<Float>.size
-        guard floatCount > 0 else { return nil }
-        let ptr = data.bindMemory(to: Float.self, capacity: floatCount)
-
+        // Let CoreMedia allocate an AudioBufferList sized for the actual channel
+        // count. SCK system audio is non-interleaved stereo (2 buffers); a bare
+        // AudioBufferList holds only one, so a fixed-size list fails with
+        // kCMSampleBufferError_ArrayTooSmall and we'd drop every buffer.
         var result: [Float]?
-        if nonInterleaved || channels == 1 {
-            // buffers[0] is a single channel already.
-            result = append(UnsafeBufferPointer(start: ptr, count: floatCount))
-        } else {
-            // Interleaved: pull channel 0 (stride by channel count).
-            var mono = [Float](); mono.reserveCapacity(floatCount / channels)
-            var i = 0
-            while i < floatCount { mono.append(ptr[i]); i += channels }
-            result = mono.withUnsafeBufferPointer { append($0) }
+        do {
+            try sampleBuffer.withAudioBufferList { abl, _ in
+                guard let firstBuffer = abl.first, let data = firstBuffer.mData else { return }
+                let floatCount = Int(firstBuffer.mDataByteSize) / MemoryLayout<Float>.size
+                guard floatCount > 0 else { return }
+                let ptr = data.bindMemory(to: Float.self, capacity: floatCount)
+
+                if nonInterleaved || channels == 1 {
+                    // buffers[0] is a single channel already.
+                    result = append(UnsafeBufferPointer(start: ptr, count: floatCount))
+                } else {
+                    // Interleaved: pull channel 0 (stride by channel count).
+                    var mono = [Float](); mono.reserveCapacity(floatCount / channels)
+                    var i = 0
+                    while i < floatCount { mono.append(ptr[i]); i += channels }
+                    result = mono.withUnsafeBufferPointer { append($0) }
+                }
+            }
+        } catch {
+            return nil
         }
         return result
     }
@@ -146,9 +141,11 @@ final class AudioLevelMonitor: NSObject, ObservableObject, SCStreamDelegate, SCS
     // Touched only from `sampleQueue` (the SCStreamOutput callback), never main.
     private nonisolated(unsafe) let analyzer: AudioAnalyzer
     private let sampleQueue = DispatchQueue(label: "pro.getcanopy.audio.capture")
+    private let screenQueue = DispatchQueue(label: "pro.getcanopy.audio.screen")
     private var stream: SCStream?
     private var enabled = false
     private var starting = false
+    private var lastAttempt = Date.distantPast
 
     // Display smoothing + auto-gain.
     private var peak: Float = 1e-4
@@ -160,15 +157,33 @@ final class AudioLevelMonitor: NSObject, ObservableObject, SCStreamDelegate, SCS
         super.init()
     }
 
-    /// Start/stop capture to match playback (idempotent).
+    /// Debug side-channel (unified logging doesn't surface this app's NSLog in
+    /// the test environment). Writes only when CANOPY_AUDIO_DEBUG is set.
+    nonisolated static func debugStatus(_ message: String) {
+        let on = ProcessInfo.processInfo.environment["CANOPY_AUDIO_DEBUG"] != nil
+            || CommandLine.arguments.contains("--audio-debug")
+        guard on else { return }
+        let line = "\(Date()): \(message)\n"
+        try? line.write(toFile: "/tmp/canopy_audio_status.txt", atomically: true, encoding: .utf8)
+    }
+
+    /// Reconcile capture with playback. Safe to call repeatedly — it retries a
+    /// failed start (e.g. after the user grants Screen Recording) without needing
+    /// a relaunch, throttled so it can't spam.
     func setEnabled(_ on: Bool) {
-        guard on != enabled else { return }
         enabled = on
         if on {
-            Task { await startCapture() }
-        } else {
+            ensureRunning()
+        } else if stream != nil {
             stopCapture()
         }
+    }
+
+    private func ensureRunning() {
+        guard enabled, stream == nil, !starting else { return }
+        guard Date().timeIntervalSince(lastAttempt) > 2 else { return } // throttle retries
+        lastAttempt = Date()
+        Task { await startCapture() }
     }
 
     private func startCapture() async {
@@ -184,21 +199,26 @@ final class AudioLevelMonitor: NSObject, ObservableObject, SCStreamDelegate, SCS
             config.capturesAudio = true
             config.sampleRate = 48_000
             config.channelCount = 2
-            // Minimal video — we only want the audio tap.
+            // Minimal video — we only want the audio tap, but a screen output must
+            // also be attached or ScreenCaptureKit won't deliver audio at all.
             config.width = 160
             config.height = 90
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 10)
             config.queueDepth = 3
 
             let stream = SCStream(filter: filter, configuration: config, delegate: self)
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
+            try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: screenQueue)
             try await stream.startCapture()
             self.stream = stream
             self.permissionDenied = false
+            NSLog("Canopy: audio capture started")
+            Self.debugStatus("started")
         } catch {
             NSLog("Canopy: audio capture unavailable (\(error.localizedDescription)); EQ bars fall back to animation")
             self.permissionDenied = true
             self.stream = nil
+            Self.debugStatus("failed: \(error.localizedDescription)")
         }
     }
 
@@ -214,7 +234,9 @@ final class AudioLevelMonitor: NSObject, ObservableObject, SCStreamDelegate, SCS
         }
     }
 
-    // SCStreamOutput — called on `sampleQueue`.
+    // SCStreamOutput — audio arrives on `sampleQueue`, screen frames (attached
+    // only because SCK won't deliver audio without a screen output) on
+    // `screenQueue`; we ignore the latter.
     nonisolated func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio else { return }
         guard let bands = analyzer.consume(sampleBuffer) else { return }
@@ -229,8 +251,20 @@ final class AudioLevelMonitor: NSObject, ObservableObject, SCStreamDelegate, SCS
         }
     }
 
+    private var loggedFirstLevels = false
+    private var lastStatusWrite = Date.distantPast
+
     private func publish(_ raw: [Float]) {
         guard raw.count == bandCount else { return }
+        if !loggedFirstLevels {
+            loggedFirstLevels = true
+            NSLog("Canopy: audio levels flowing (first band energy \(raw[0]))")
+        }
+        if Date().timeIntervalSince(lastStatusWrite) > 0.4 {
+            lastStatusWrite = Date()
+            let shown = display.map { String(format: "%.2f", $0) }.joined(separator: " ")
+            Self.debugStatus("levels \(shown)")
+        }
         let maxEnergy = raw.max() ?? 0
         // Auto-gain: track the recent peak with slow decay so bars use the full
         // range regardless of overall loudness.
