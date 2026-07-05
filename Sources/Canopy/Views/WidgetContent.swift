@@ -63,7 +63,7 @@ struct WidgetContent: View {
             }
             .padding(.horizontal, 20)
 
-            ScrubBar(vm: vm, accent: vm.palette.first ?? .white)
+            ScrubBar(vm: vm)
                 .padding(.horizontal, 26)
 
             TransportControls(vm: vm)
@@ -119,7 +119,8 @@ struct ClockView: View {
         let f = DateFormatter(); f.dateFormat = "h:mm"; return f
     }()
     private static let dateFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "EEEE, MMMM d"; return f
+        // Short iOS-lockscreen style, e.g. "Fri May 8".
+        let f = DateFormatter(); f.dateFormat = "EEE MMM d"; return f
     }()
 
     var body: some View {
@@ -145,10 +146,16 @@ struct NowPlayingCard: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            // The current synced lyric line, tinted from the album palette.
             if let lyric = vm.currentLyric {
                 Text(lyric)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: vm.palette.count >= 2 ? Array(vm.palette.prefix(2)) : [.white, .white],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
@@ -156,23 +163,8 @@ struct NowPlayingCard: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
-            HStack(spacing: 12) {
-                Artwork(image: vm.artwork, size: 44, corner: 8)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(vm.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Text(vm.artist)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(1)
-                }
-                Spacer()
-            }
-
-            ScrubBar(vm: vm, accent: vm.palette.first ?? .white)
-            TransportControls(vm: vm, compact: true)
+            // Same compact player card as the island, on frosted glass.
+            PlayerCard(vm: vm)
         }
         .padding(16)
         .background(

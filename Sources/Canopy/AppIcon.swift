@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The Canopy app icon — a leaf over a green gradient squircle with a hint of
-/// the Dynamic Island notch.
+/// The Canopy app icon — a dark scalloped rosette ("canopy" silhouette) on a
+/// warm cream squircle, drawn from scratch.
 struct AppIconView: View {
     var body: some View {
         ZStack {
@@ -9,30 +9,58 @@ struct AppIconView: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.18, green: 0.66, blue: 0.44),
-                            Color(red: 0.04, green: 0.28, blue: 0.22)
+                            Color(red: 0.97, green: 0.94, blue: 0.89),
+                            Color(red: 0.92, green: 0.87, blue: 0.80)
                         ],
                         startPoint: .topLeading, endPoint: .bottomTrailing
                     )
                 )
 
-            // A nod to the notch / Dynamic Island.
-            RoundedRectangle(cornerRadius: 70, style: .continuous)
-                .fill(.black.opacity(0.85))
-                .frame(width: 360, height: 132)
-                .offset(y: -250)
-
-            Image(systemName: "leaf.fill")
-                .font(.system(size: 440, weight: .bold))
-                .foregroundStyle(
-                    LinearGradient(colors: [.white, .white.opacity(0.82)],
-                                   startPoint: .top, endPoint: .bottom)
+            Rosette(petals: 8)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.16, green: 0.13, blue: 0.11),
+                            Color(red: 0.05, green: 0.04, blue: 0.04)
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    )
                 )
-                .rotationEffect(.degrees(-18))
-                .shadow(color: .black.opacity(0.25), radius: 30, y: 18)
-                .offset(y: 70)
+                .frame(width: 560, height: 560)
+                .shadow(color: .black.opacity(0.28), radius: 26, y: 16)
         }
         .frame(width: 1024, height: 1024)
+    }
+}
+
+/// A scalloped flower/seal silhouette: a ring of overlapping petal circles
+/// around a solid core, which unions into one shape when filled.
+struct Rosette: Shape {
+    var petals: Int = 8
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        let petalRadius = radius * 0.38
+        let orbit = radius - petalRadius
+
+        // Core.
+        path.addEllipse(in: CGRect(
+            x: center.x - orbit, y: center.y - orbit,
+            width: orbit * 2, height: orbit * 2
+        ))
+        // Petals.
+        for i in 0..<petals {
+            let angle = (Double(i) / Double(petals)) * 2 * .pi
+            let cx = center.x + cos(angle) * orbit
+            let cy = center.y + sin(angle) * orbit
+            path.addEllipse(in: CGRect(
+                x: cx - petalRadius, y: cy - petalRadius,
+                width: petalRadius * 2, height: petalRadius * 2
+            ))
+        }
+        return path
     }
 }
 

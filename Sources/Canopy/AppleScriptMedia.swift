@@ -80,6 +80,28 @@ final class AppleScriptMedia {
         }
     }
 
+    func setShuffle(on: Bool) {
+        let app = activeApp
+        let script = app == "Spotify"
+            ? "tell application \"Spotify\" to set shuffling to \(on)"
+            : "tell application \"Music\" to set shuffle enabled to \(on)"
+        queue.async { _ = Self.runOSAScript(script) }
+    }
+
+    /// Repeat: 1 = off, 2 = one, 3 = all (matching the MediaRemote mode values).
+    func setRepeat(mode: Int) {
+        let app = activeApp
+        let script: String
+        if app == "Spotify" {
+            // Spotify's AppleScript API only exposes a boolean.
+            script = "tell application \"Spotify\" to set repeating to \(mode != 1)"
+        } else {
+            let value = mode == 2 ? "one" : (mode == 3 ? "all" : "off")
+            script = "tell application \"Music\" to set song repeat to \(value)"
+        }
+        queue.async { _ = Self.runOSAScript(script) }
+    }
+
     // MARK: Helpers
 
     private static func runOSAScript(_ source: String) -> String? {

@@ -15,6 +15,10 @@ struct NowPlayingSnapshot {
     /// Whether this update spoke about artwork at all (so a diff that simply
     /// didn't mention art doesn't clobber the existing image).
     var carriedArtwork: Bool = false
+    /// MediaRemote modes when the backend reports them (nil = unknown).
+    /// Shuffle: 1 = off, 2 = albums, 3 = songs. Repeat: 1 = off, 2 = one, 3 = all.
+    var shuffleMode: Int?
+    var repeatMode: Int?
 
     var isEmpty: Bool { title.isEmpty }
 }
@@ -152,6 +156,30 @@ final class MediaController {
         case .appleScript:
             appleScript.seek(toTime: t)
         case .none:
+            break
+        }
+    }
+
+    /// Shuffle: 1 = off, 3 = songs (MediaRemote mode values).
+    func setShuffle(mode: Int) {
+        switch backend {
+        case .adapter:
+            runAdapter(["shuffle", "\(mode)"])
+        case .appleScript:
+            appleScript.setShuffle(on: mode != 1)
+        case .mediaRemote, .none:
+            break // no reliable direct-MediaRemote shuffle API
+        }
+    }
+
+    /// Repeat: 1 = off, 2 = one, 3 = all (MediaRemote mode values).
+    func setRepeat(mode: Int) {
+        switch backend {
+        case .adapter:
+            runAdapter(["repeat", "\(mode)"])
+        case .appleScript:
+            appleScript.setRepeat(mode: mode)
+        case .mediaRemote, .none:
             break
         }
     }
@@ -296,6 +324,10 @@ final class MediaController {
         } else {
             s.timestamp = Date()
         }
+
+        // Shuffle / repeat modes, when the source app reports them.
+        s.shuffleMode = (info["shuffleMode"] as? NSNumber)?.intValue
+        s.repeatMode = (info["repeatMode"] as? NSNumber)?.intValue
 
         // Only treat artwork as "spoken about" when this update mentioned it, so a
         // metadata-only diff doesn't drop the current art.

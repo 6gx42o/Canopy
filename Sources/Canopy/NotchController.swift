@@ -5,6 +5,9 @@ import Combine
 struct NotchMetrics {
     var notchWidth: CGFloat
     var notchHeight: CGFloat
+    /// False on notchless Macs / external displays — the island then floats
+    /// detached from the top edge with all four corners rounded.
+    var hasNotch: Bool = true
 }
 
 enum NotchPresentation {
@@ -103,6 +106,7 @@ final class NotchController {
     }
 
     private func rebuildRootView() {
+        hosting.floating = !metrics.hasNotch
         hosting.rootView = NotchView(
             vm: model,
             settings: settings,
@@ -189,12 +193,14 @@ final class NotchController {
         window.setFrame(frame(for: size), display: true)
     }
 
-    /// Top-center of the notch screen; top edge flush with the physical top.
+    /// Top-center of the notch screen. Flush with the physical top on notched
+    /// Macs; floating a little below it on notchless ones.
     private func frame(for size: CGSize) -> NSRect {
         let sf = screen.frame
+        let topGap: CGFloat = metrics.hasNotch ? 0 : 10
         return NSRect(
             x: sf.midX - size.width / 2,
-            y: sf.maxY - size.height,
+            y: sf.maxY - size.height - topGap,
             width: size.width,
             height: size.height
         )
@@ -217,11 +223,12 @@ final class NotchController {
            let right = screen.auxiliaryTopRightArea {
             let width = screen.frame.width - left.width - right.width
             if width > 0 {
-                return NotchMetrics(notchWidth: width, notchHeight: topInset)
+                return NotchMetrics(notchWidth: width, notchHeight: topInset, hasNotch: true)
             }
         }
-        // No notch (external display / older Mac): a floating island.
-        return NotchMetrics(notchWidth: 190, notchHeight: 32)
+        // No notch (notchless MacBook / external display): a floating island
+        // detached from the top edge, like the real thing's notchless mode.
+        return NotchMetrics(notchWidth: 190, notchHeight: 36, hasNotch: false)
     }
 }
 
@@ -230,12 +237,15 @@ final class NotchController {
 /// `hitTest`, so AppKit passes them through to whatever app is underneath
 /// instead of the island swallowing the whole top strip.
 private final class NotchHostingView: NSHostingView<NotchView> {
+    /// Mirrors NotchMetrics.hasNotch so the hit path matches the drawn shape.
+    var floating = false
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         // `point` is in the superview's coordinates; bring it into our own.
         // NSHostingView is flipped (top-left origin), matching NotchShape's
         // coordinate space, so the path lines up with what's rendered.
         let local = convert(point, from: superview)
-        let shape = NotchShape().path(in: bounds).cgPath
+        let shape = NotchShape(topRadius: floating ? 20 : 8).path(in: bounds).cgPath
         guard shape.contains(local) else { return nil }
         return super.hitTest(point)
     }

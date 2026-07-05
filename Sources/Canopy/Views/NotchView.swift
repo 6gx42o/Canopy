@@ -29,6 +29,12 @@ struct NotchView: View {
 
     private var isOpen: Bool { presentation != .collapsed }
 
+    /// The island silhouette: notch-extension on notched Macs, a fully rounded
+    /// floating capsule card on notchless ones.
+    private var shape: NotchShape {
+        NotchShape(topRadius: metrics.hasNotch ? 8 : 20)
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             switch presentation {
@@ -55,11 +61,11 @@ struct NotchView: View {
             ZStack {
                 // Always solid black so the island reads as an extension of the
                 // physical notch.
-                NotchShape().fill(.black)
+                shape.fill(.black)
                 if isOpen, settings.hoverStyle == .subtleGradient {
                     // A faint light sheen over the black — still dark, just a hint
                     // of dimension. (Not the album-color tint, which floated.)
-                    NotchShape()
+                    shape
                         .fill(
                             LinearGradient(
                                 colors: [
@@ -72,13 +78,13 @@ struct NotchView: View {
                         )
                 }
             }
-            .shadow(color: .black.opacity(isOpen ? 0.5 : 0), radius: 20, y: 10)
+            .shadow(color: .black.opacity(isOpen || !metrics.hasNotch ? 0.5 : 0), radius: 20, y: 10)
         )
         .overlay(
-            NotchShape().stroke(Color.white.opacity(isOpen ? 0.10 : 0), lineWidth: 0.5)
+            shape.stroke(Color.white.opacity(isOpen ? 0.10 : 0), lineWidth: 0.5)
         )
         .overlay(dropHint)
-        .contentShape(NotchShape())
+        .contentShape(shape)
         .onHover { hovering = $0; onPresent(presentation) }
         .onChange(of: vm.shelfPinned) { _, _ in onPresent(presentation) }
         .onChange(of: vm.bannerActive) { _, _ in onPresent(presentation) }
@@ -100,7 +106,7 @@ struct NotchView: View {
 
     @ViewBuilder private var dropHint: some View {
         if vm.isDropTargeted {
-            NotchShape()
+            shape
                 .stroke(Color.white.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
                 .padding(4)
         }
@@ -198,71 +204,76 @@ struct BannerView: View {
 
 // MARK: - Expanded
 
-struct ExpandedPanel: View {
+/// The compact iOS-style player card used by the expanded island (and, in glass,
+/// by the lockscreen widget): artwork + title/artist + EQ bars on top, an inline
+/// elapsed / −remaining scrubber, then shuffle · prev · play · next · repeat.
+struct PlayerCard: View {
     @ObservedObject var vm: NowPlayingModel
     var scale: CGFloat = 1
 
-    private var accent: Color { vm.palette.first ?? .white }
     private func s(_ x: CGFloat) -> CGFloat { x * scale }
 
     var body: some View {
-        VStack(spacing: s(10)) {
-            HStack(spacing: s(12)) {
-                Artwork(image: vm.artwork, size: s(52), corner: s(10))
-                VStack(alignment: .leading, spacing: 3) {
+        VStack(spacing: s(8)) {
+            HStack(spacing: s(10)) {
+                Artwork(image: vm.artwork, size: s(40), corner: s(9))
+                VStack(alignment: .leading, spacing: 2) {
                     Text(vm.hasMedia ? vm.title : "Nothing Playing")
-                        .font(.system(size: s(13), weight: .semibold))
+                        .font(.system(size: s(13), weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
                     Text(vm.hasMedia ? vm.artist : "Canopy")
                         .font(.system(size: s(11)))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.white.opacity(0.55))
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                EqualizerBars(active: vm.isPlaying, color: .white.opacity(0.85))
+                EqualizerBars(active: vm.isPlaying, color: .white.opacity(0.9))
             }
 
-            if let lyric = vm.currentLyric {
-                Text(lyric)
-                    .font(.system(size: s(12), weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(colors: lyricColors, startPoint: .leading, endPoint: .trailing)
-                    )
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .id(lyric)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .move(edge: .bottom)),
-                        removal: .opacity
-                    ))
-            }
+            ScrubBar(vm: vm, scale: scale)
 
-            ScrubBar(vm: vm, accent: accent)
-
-            HStack(spacing: s(28)) {
+            HStack(spacing: 0) {
+                ControlButton(system: "shuffle", size: s(12), dim: !vm.shuffleOn) { vm.toggleShuffle() }
+                Spacer()
                 ControlButton(system: "backward.fill", size: s(16)) { vm.previous() }
-                ControlButton(system: vm.isPlaying ? "pause.fill" : "play.fill", size: s(22)) { vm.togglePlayPause() }
+                Spacer()
+                ControlButton(system: vm.isPlaying ? "pause.fill" : "play.fill", size: s(21)) { vm.togglePlayPause() }
+                Spacer()
                 ControlButton(system: "forward.fill", size: s(16)) { vm.next() }
+                Spacer()
+                ControlButton(
+                    system: vm.repeatMode == 2 ? "repeat.1" : "repeat",
+                    size: s(12),
+                    dim: vm.repeatMode == 1
+                ) { vm.cycleRepeat() }
             }
+            .padding(.horizontal, s(6))
             .disabled(!vm.hasMedia)
             .opacity(vm.hasMedia ? 1 : 0.4)
+        }
+    }
+}
+
+struct ExpandedPanel: View {
+    @ObservedObject var vm: NowPlayingModel
+    var scale: CGFloat = 1
+
+    private func s(_ x: CGFloat) -> CGFloat { x * scale }
+
+    var body: some View {
+        VStack(spacing: s(10)) {
+            PlayerCard(vm: vm, scale: scale)
 
             if !vm.shelfFiles.isEmpty {
                 ShelfStrip(vm: vm)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-        .padding(.horizontal, s(18))
-        .padding(.top, s(14))
+        .padding(.horizontal, s(16))
+        .padding(.top, s(12))
         .padding(.bottom, s(12))
         .frame(maxWidth: .infinity, alignment: .top)
-    }
-
-    private var lyricColors: [Color] {
-        let p = vm.palette.map { $0.opacity(1) }
-        return p.count >= 2 ? Array(p.prefix(2)) : [.white, .white.opacity(0.8)]
     }
 }
 
@@ -270,7 +281,7 @@ struct ExpandedPanel: View {
 
 struct ScrubBar: View {
     @ObservedObject var vm: NowPlayingModel
-    var accent: Color
+    var scale: CGFloat = 1
 
     @State private var dragging = false
     @State private var dragFraction: Double = 0
@@ -285,14 +296,17 @@ struct ScrubBar: View {
             let frac = dragging ? dragFraction : currentFraction
             let displayElapsed = dragging ? dragFraction * vm.duration : live
 
-            VStack(spacing: 4) {
+            // iOS-style inline layout: elapsed · bar · −remaining on one line.
+            HStack(spacing: 6 * scale) {
+                Text(timeString(displayElapsed))
+                    .frame(width: 30 * scale, alignment: .leading)
+
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(.white.opacity(0.16))
-                            .frame(height: dragging ? 6 : 4)
-                        Capsule()
-                            .fill(LinearGradient(colors: fillColors, startPoint: .leading, endPoint: .trailing))
-                            .frame(width: geo.size.width * frac, height: dragging ? 6 : 4)
+                        Capsule().fill(.white.opacity(0.22))
+                            .frame(height: dragging ? 5 : 3)
+                        Capsule().fill(.white.opacity(0.9))
+                            .frame(width: geo.size.width * frac, height: dragging ? 5 : 3)
                     }
                     .frame(height: 16, alignment: .center)
                     .contentShape(Rectangle())
@@ -310,20 +324,14 @@ struct ScrubBar: View {
                 }
                 .frame(height: 16)
 
-                HStack {
-                    Text(timeString(displayElapsed))
-                    Spacer()
-                    Text(timeString(vm.duration))
-                }
-                .font(.system(size: 9, weight: .medium).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.45))
+                Text("-" + timeString(max(vm.duration - displayElapsed, 0)))
+                    .frame(width: 34 * scale, alignment: .trailing)
             }
+            .font(.system(size: 9 * scale, weight: .medium).monospacedDigit())
+            .foregroundStyle(.white.opacity(0.5))
         }
     }
 
-    private var fillColors: [Color] {
-        vm.palette.count >= 2 ? Array(vm.palette.prefix(2)) : [.white.opacity(0.9), .white.opacity(0.7)]
-    }
     private func clamp(_ x: Double) -> Double { min(max(x, 0), 1) }
 }
 
@@ -389,9 +397,10 @@ struct FileChip: View {
     }
 }
 
-private struct ControlButton: View {
+struct ControlButton: View {
     var system: String
     var size: CGFloat
+    var dim: Bool = false
     var action: () -> Void
 
     @State private var hovering = false
@@ -400,7 +409,7 @@ private struct ControlButton: View {
         Button(action: action) {
             Image(systemName: system)
                 .font(.system(size: size, weight: .medium))
-                .foregroundStyle(.white)
+                .foregroundStyle(.white.opacity(dim ? 0.45 : 1))
                 .frame(width: size + 14, height: size + 14)
                 .background(Circle().fill(.white.opacity(hovering ? 0.14 : 0)))
                 .contentShape(Circle())

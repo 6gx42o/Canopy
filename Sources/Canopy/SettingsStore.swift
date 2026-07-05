@@ -46,19 +46,20 @@ enum NotchSize: String, CaseIterable, Identifiable {
     }
 
     /// Extra width added on top of the physical notch width, the minimum overall
-    /// width, and the expanded/banner heights — tuned per size.
+    /// width, and the expanded/banner heights — tuned per size. Medium matches
+    /// the compact card proportions of the real Dynamic Island player.
     var extraWidth: CGFloat {
         switch self {
-        case .small:  return 280
-        case .medium: return 360
-        case .large:  return 460
+        case .small:  return 120
+        case .medium: return 160
+        case .large:  return 240
         }
     }
     var minWidth: CGFloat {
         switch self {
-        case .small:  return 380
-        case .medium: return 420
-        case .large:  return 520
+        case .small:  return 300
+        case .medium: return 340
+        case .large:  return 420
         }
     }
     var bannerHeight: CGFloat {

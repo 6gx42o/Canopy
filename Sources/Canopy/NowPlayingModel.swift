@@ -21,6 +21,13 @@ final class NowPlayingModel: ObservableObject {
     /// Human-readable name of the active media backend (for the menu).
     @Published var backendName: String = "starting…"
 
+    /// Shuffle / repeat state (MediaRemote modes; shuffle: 1 off / 3 songs,
+    /// repeat: 1 off / 2 one / 3 all). Optimistic until the backend confirms.
+    @Published var shuffleMode: Int = 1
+    @Published var repeatMode: Int = 1
+
+    var shuffleOn: Bool { shuffleMode != 1 }
+
     // Apple-Music-style gradient palette derived from album art.
     @Published var palette: [Color] = ColorExtractor.fallback
 
@@ -146,6 +153,10 @@ final class NowPlayingModel: ObservableObject {
 
         if !title.isEmpty { hasContent = true }
 
+        // Adopt shuffle/repeat when the backend reports them.
+        if let mode = snap.shuffleMode { shuffleMode = mode }
+        if let mode = snap.repeatMode { repeatMode = mode }
+
         // Capture system audio for the EQ bars only while actually playing.
         AudioLevelMonitor.shared.setEnabled(isPlaying && !title.isEmpty)
 
@@ -258,6 +269,19 @@ final class NowPlayingModel: ObservableObject {
 
     func previous() {
         controller.send(.previousTrack)
+    }
+
+    func toggleShuffle() {
+        let newMode = shuffleOn ? 1 : 3 // off <-> songs
+        shuffleMode = newMode           // optimistic; stream confirms
+        controller.setShuffle(mode: newMode)
+    }
+
+    func cycleRepeat() {
+        // off -> all -> one -> off, like the iOS player.
+        let newMode = repeatMode == 1 ? 3 : (repeatMode == 3 ? 2 : 1)
+        repeatMode = newMode
+        controller.setRepeat(mode: newMode)
     }
 
     func seek(toFraction fraction: Double) {
