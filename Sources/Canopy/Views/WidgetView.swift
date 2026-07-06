@@ -1,5 +1,26 @@
 import SwiftUI
 
+extension View {
+    /// Native macOS 26 "Liquid Glass" where available, falling back to a material
+    /// blur on earlier systems. Used for the on-desktop cards so they read like
+    /// real Apple glass rather than a flat translucent fill.
+    @ViewBuilder
+    func liquidGlass(cornerRadius: CGFloat, tint: Color? = nil) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if #available(macOS 26.0, *) {
+            if let tint {
+                self.glassEffect(.regular.tint(tint.opacity(0.22)), in: shape)
+            } else {
+                self.glassEffect(.regular, in: shape)
+            }
+        } else {
+            self
+                .background(.ultraThinMaterial, in: shape)
+                .overlay(shape.stroke(.white.opacity(0.14), lineWidth: 0.5))
+        }
+    }
+}
+
 /// A behind-window blur so the widget reads as real frosted glass over the
 /// desktop wallpaper.
 struct VisualEffectView: NSViewRepresentable {
@@ -44,18 +65,17 @@ struct WidgetView: View {
     @ViewBuilder private var background: some View {
         ZStack {
             if snapshotMode {
-                LinearGradient(colors: [Color(white: 0.10), Color(white: 0.04)],
+                LinearGradient(colors: [Color(white: 0.11), Color(white: 0.05)],
                                startPoint: .top, endPoint: .bottom)
             } else {
-                VisualEffectView()
+                VisualEffectView(material: .hudWindow)
             }
-            // Apple-Music-style gradient tint from album art.
-            LinearGradient(
-                colors: gradientColors,
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            )
-            .opacity(snapshotMode ? 0.85 : 0.55)
-            .blur(radius: 8)
+            // A subtle album-art wash + a dark scrim, matching the real
+            // lockscreen's dark, lightly-tinted backdrop.
+            LinearGradient(colors: gradientColors, startPoint: .topLeading, endPoint: .bottomTrailing)
+                .opacity(snapshotMode ? 0.5 : 0.3)
+                .blur(radius: 30)
+            Color.black.opacity(0.28)
         }
     }
 

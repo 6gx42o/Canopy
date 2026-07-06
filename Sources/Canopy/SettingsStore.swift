@@ -20,9 +20,9 @@ enum WidgetPreset: String, CaseIterable, Identifiable {
 
     var size: CGSize {
         switch self {
-        case .lockscreen: return CGSize(width: 340, height: 540)
+        case .lockscreen: return CGSize(width: 720, height: 460) // wide, iOS-lockscreen style
         case .nowPlaying: return CGSize(width: 340, height: 460)
-        case .lyrics:     return CGSize(width: 360, height: 500)
+        case .lyrics:     return CGSize(width: 380, height: 520)
         case .minimal:    return CGSize(width: 320, height: 200)
         }
     }

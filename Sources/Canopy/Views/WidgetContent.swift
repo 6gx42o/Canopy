@@ -15,30 +15,32 @@ struct WidgetContent: View {
         }
     }
 
-    // MARK: Lockscreen (iOS style)
+    // MARK: Lockscreen (iOS style) — clock top, artwork + glass player card on
+    // the left, big Apple-Music karaoke lyrics on the right.
 
     private var lockscreen: some View {
-        VStack(spacing: 0) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.85))
-                .padding(.top, 26)
-
+        VStack(spacing: 14) {
             ClockView()
-                .padding(.top, 6)
+                .padding(.top, 20)
 
-            Spacer()
+            HStack(alignment: .top, spacing: 26) {
+                VStack(spacing: 14) {
+                    Artwork(image: vm.artwork, size: 168, corner: 16)
+                        .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
 
-            if vm.hasMedia {
-                NowPlayingCard(vm: vm)
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 22)
-            } else {
-                Text("Not Playing")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .padding(.bottom, 30)
+                    if vm.hasMedia {
+                        PlayerCard(vm: vm)
+                            .padding(14)
+                            .liquidGlass(cornerRadius: 22, tint: vm.palette.first)
+                            .frame(width: 240)
+                    }
+                }
+
+                KaraokeLyrics(vm: vm)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
+            .padding(.horizontal, 30)
+            .padding(.bottom, 24)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -125,17 +127,81 @@ struct ClockView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
-            VStack(spacing: 2) {
+            VStack(spacing: 0) {
                 Text(Self.dateFmt.string(from: ctx.date))
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(.white.opacity(0.75))
                 Text(Self.timeFmt.string(from: ctx.date))
-                    .font(.system(size: 74, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+                    .font(.system(size: 84, weight: .bold, design: .rounded))
+                    // iOS-lockscreen translucent-white clock.
+                    .foregroundStyle(.white.opacity(0.82))
+                    .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
                     .monospacedDigit()
             }
         }
+    }
+}
+
+// MARK: - Karaoke lyrics (Apple Music style)
+
+/// Large, centered-on-current-line lyrics: current line bold white, neighbours
+/// dimmed. Lyric text is fetched at runtime from LRCLIB; nothing is bundled.
+struct KaraokeLyrics: View {
+    @ObservedObject var vm: NowPlayingModel
+
+    var body: some View {
+        GeometryReader { _ in
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if vm.lyrics.isEmpty {
+                            Text(vm.hasMedia ? "No synced lyrics for this track" : "Nothing playing")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.4))
+                                .padding(.top, 30)
+                        }
+                        ForEach(Array(vm.lyrics.enumerated()), id: \.element.id) { idx, line in
+                            Button {
+                                vm.seek(toTime: line.time)
+                            } label: {
+                                Text(line.text.isEmpty ? "♪" : line.text)
+                                    .font(.system(size: isCurrent(idx) ? 26 : 22, weight: .bold))
+                                    .foregroundStyle(opacity(idx))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .id(idx)
+                            .animation(.easeInOut(duration: 0.3), value: vm.currentLyricIndex)
+                        }
+                    }
+                    .padding(.vertical, 24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .mask(
+                    // Fade top/bottom edges like the real karaoke view.
+                    LinearGradient(
+                        colors: [.clear, .black, .black, .clear],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .onChange(of: vm.currentLyricIndex) { _, new in
+                    guard let new else { return }
+                    withAnimation(.easeInOut(duration: 0.4)) {
+                        proxy.scrollTo(new, anchor: .center)
+                    }
+                }
+            }
+        }
+    }
+
+    private func isCurrent(_ idx: Int) -> Bool { idx == vm.currentLyricIndex }
+
+    private func opacity(_ idx: Int) -> Color {
+        if isCurrent(idx) { return .white }
+        if let cur = vm.currentLyricIndex, idx < cur { return .white.opacity(0.28) }
+        return .white.opacity(0.45)
     }
 }
 
