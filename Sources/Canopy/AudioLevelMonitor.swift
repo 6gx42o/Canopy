@@ -1,6 +1,7 @@
 import Foundation
 import ScreenCaptureKit
 import CoreMedia
+import CoreGraphics
 import Accelerate
 
 /// Real-time audio spectrum analyzer fed by ScreenCaptureKit system-audio
@@ -145,7 +146,9 @@ final class AudioLevelMonitor: NSObject, ObservableObject, SCStreamDelegate, SCS
     private var stream: SCStream?
     private var enabled = false
     private var starting = false
-    private var lastAttempt = Date.distantPast
+    /// We prompt for Screen Recording at most ONCE per launch, then never again —
+    /// otherwise the reconcile loop re-triggers the system popup every attempt.
+    private var didPrompt = false
 
     // Display smoothing + auto-gain.
     private var peak: Float = 1e-4
@@ -167,9 +170,7 @@ final class AudioLevelMonitor: NSObject, ObservableObject, SCStreamDelegate, SCS
         try? line.write(toFile: "/tmp/canopy_audio_status.txt", atomically: true, encoding: .utf8)
     }
 
-    /// Reconcile capture with playback. Safe to call repeatedly — it retries a
-    /// failed start (e.g. after the user grants Screen Recording) without needing
-    /// a relaunch, throttled so it can't spam.
+    /// Reconcile capture with playback. Safe to call repeatedly.
     func setEnabled(_ on: Bool) {
         enabled = on
         if on {
@@ -179,11 +180,33 @@ final class AudioLevelMonitor: NSObject, ObservableObject, SCStreamDelegate, SCS
         }
     }
 
+    /// Start capture ONLY when Screen Recording is already granted, checked
+    /// SILENTLY via CGPreflightScreenCaptureAccess() (no system popup). We never
+    /// auto-prompt — otherwise the dialog reappears on every launch/rebuild.
+    /// The prompt happens exactly once, only when the user clicks Enable in
+    /// Settings (`requestFromSettings`).
     private func ensureRunning() {
         guard enabled, stream == nil, !starting else { return }
-        guard Date().timeIntervalSince(lastAttempt) > 2 else { return } // throttle retries
-        lastAttempt = Date()
-        Task { await startCapture() }
+        if CGPreflightScreenCaptureAccess() {
+            permissionDenied = false
+            Task { await startCapture() }
+        } else {
+            permissionDenied = true // fall back to the animated bars, silently
+        }
+    }
+
+    /// Explicit opt-in from Settings: show the Screen Recording prompt (once),
+    /// then start if already granted. This is the ONLY place that can pop the
+    /// system dialog.
+    func requestFromSettings() {
+        if CGPreflightScreenCaptureAccess() {
+            ensureRunning()
+        } else if !didPrompt {
+            didPrompt = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                _ = CGRequestScreenCaptureAccess()
+            }
+        }
     }
 
     private func startCapture() async {

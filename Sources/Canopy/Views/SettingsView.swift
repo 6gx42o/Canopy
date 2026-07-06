@@ -70,12 +70,16 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     if audio.levels.isEmpty {
-                        HStack {
-                            Text("Grant Screen Recording for bars that react to the audio.")
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Bars are animated. For bars that react to the actual audio, enable Screen Recording (a one-time macOS prompt), then relaunch Canopy.")
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
-                            Spacer()
-                            Button("Open…") { openScreenRecording() }
+                                .fixedSize(horizontal: false, vertical: true)
+                            HStack {
+                                Button("Enable Audio Bars") { audio.requestFromSettings() }
+                                Button("Open Settings…") { openScreenRecording() }
+                                Spacer()
+                            }
                         }
                     }
                 }
